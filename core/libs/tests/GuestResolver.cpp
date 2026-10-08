@@ -6,8 +6,13 @@
 #include <cstdlib>
 #include <cstdio>
 #include <source_location>
+#include <barrier>
+#include <string>
+#include <thread>
 
 extern "C" {
+GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char*);
+int* APS5_VABI sceNetErrnoLoc();
 int APS5_VABI getaddrinfo_nid_postfix(const char*, const char*, const GuestResolver::AddressInfo*, GuestResolver::AddressInfo**);
 void APS5_VABI freeaddrinfo_nid_postfix(GuestResolver::AddressInfo*);
 int APS5_VABI getnameinfo_nid_postfix(const void*, std::uint32_t, char*, std::uint32_t, char*, std::uint32_t, int);
@@ -20,6 +25,29 @@ void Require(bool condition, std::source_location location = std::source_locatio
     }
 }
 int main() {
+    auto* legacy = gethostbyname_nid_postfix("127.0.0.1");
+    Require(legacy && legacy->name && std::strcmp(legacy->name, "127.0.0.1") == 0);
+    Require(legacy->family == 2 && legacy->length == 4);
+    const std::array<unsigned char, 4> loopback{127, 0, 0, 1};
+    Require(legacy->addresses && legacy->addresses[0]);
+    Require(std::memcmp(legacy->addresses[0], loopback.data(), loopback.size()) == 0);
+    Require(legacy->addresses[1] == nullptr && legacy->aliases && legacy->aliases[0] == nullptr);
+    std::barrier ready(2);
+    std::thread worker([&] {
+        auto* entry = gethostbyname_nid_postfix("127.0.0.2");
+        ready.arrive_and_wait();
+        const std::array<unsigned char, 4> expected{127, 0, 0, 2};
+        Require(entry && std::strcmp(entry->name, "127.0.0.2") == 0);
+        Require(std::memcmp(entry->addresses[0], expected.data(), expected.size()) == 0);
+    });
+    legacy = gethostbyname_nid_postfix("127.0.0.1");
+    ready.arrive_and_wait();
+    Require(std::strcmp(legacy->name, "127.0.0.1") == 0);
+    Require(std::memcmp(legacy->addresses[0], loopback.data(), loopback.size()) == 0);
+    worker.join();
+    *sceNetErrnoLoc() = 77;
+    Require(gethostbyname_nid_postfix(std::string(1024, 'a').c_str()) == nullptr);
+    Require(*sceNetErrnoLoc() >= 1 && *sceNetErrnoLoc() <= 4);
     std::array<unsigned char, 16> v4{16, 2, 0x6d, 0x06, 127, 0, 0, 1};
     char host[128]{}, service[32]{};
     Require(getnameinfo_nid_postfix(v4.data(), v4.size(), host, sizeof(host), service, sizeof(service), 10) == 0);
