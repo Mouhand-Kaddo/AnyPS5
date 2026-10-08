@@ -1,3 +1,9 @@
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#else
+#include <netdb.h>
+#endif
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libScePosixForWebKit/GuestResolver.hpp"
 #include <array>
@@ -32,6 +38,22 @@ int main() {
     Require(legacy->addresses && legacy->addresses[0]);
     Require(std::memcmp(legacy->addresses[0], loopback.data(), loopback.size()) == 0);
     Require(legacy->addresses[1] == nullptr && legacy->aliases && legacy->aliases[0] == nullptr);
+    legacy = gethostbyname_nid_postfix("localhost");
+    const auto* native = ::gethostbyname("localhost");
+    Require(legacy && native && std::strcmp(legacy->name, native->h_name) == 0);
+    Require(legacy->family == 2 && legacy->length == native->h_length);
+    std::size_t index = 0;
+    while (native->h_aliases[index]) {
+        Require(legacy->aliases[index] && std::strcmp(legacy->aliases[index], native->h_aliases[index]) == 0);
+        ++index;
+    }
+    Require(legacy->aliases[index] == nullptr);
+    index = 0;
+    while (native->h_addr_list[index]) {
+        Require(legacy->addresses[index] && std::memcmp(legacy->addresses[index], native->h_addr_list[index], legacy->length) == 0);
+        ++index;
+    }
+    Require(legacy->addresses[index] == nullptr);
     std::barrier ready(2);
     std::thread worker([&] {
         auto* entry = gethostbyname_nid_postfix("127.0.0.2");

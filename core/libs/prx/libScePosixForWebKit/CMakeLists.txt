@@ -22,6 +22,7 @@ if(BUILD_TESTING)
     target_link_libraries(guest_resolver_tests PRIVATE libScePosixForWebKit libSceNet)
     add_test(NAME guest_resolver COMMAND guest_resolver_tests)
     if(WIN32)
+        target_link_libraries(guest_resolver_tests PRIVATE ws2_32)
         set_tests_properties(guest_resolver PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePosixForWebKit>")
     endif()

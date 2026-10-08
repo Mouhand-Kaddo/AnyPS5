@@ -11,9 +11,24 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
+#include <new>
+#include <string>
+#include <vector>
 #include "GuestResolver.hpp"
 
+extern "C" int* APS5_VABI sceNetErrnoLoc();
+
 namespace {
+struct HostLookup {
+    GuestResolver::HostEntry entry{};
+    std::string name;
+    std::vector<std::string> aliasNames;
+    std::vector<char*> aliases;
+    std::vector<std::string> addressBytes;
+    std::vector<char*> addresses;
+};
+
 bool Ready() {
 #ifdef _WIN32
     static const int status = [] { WSADATA data{}; return WSAStartup(MAKEWORD(2, 2), &data); }();
@@ -41,6 +56,53 @@ int GuestError(int error) {
 }
 
 extern "C" {
+GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char* name) {
+    if (!name || !Ready()) { *sceNetErrnoLoc() = 3; return nullptr; }
+    try {
+#ifdef _WIN32
+        auto* native = ::gethostbyname(name);
+        if (!native) {
+            const auto error = WSAGetLastError();
+            *sceNetErrnoLoc() = error == WSAHOST_NOT_FOUND ? 1 : error == WSATRY_AGAIN ? 2 : error == WSANO_DATA ? 4 : 3;
+            return nullptr;
+        }
+#else
+        hostent nativeEntry{};
+        hostent* native = nullptr;
+        std::vector<char> buffer(1024);
+        int hostError = 0;
+        int error;
+        while ((error = ::gethostbyname_r(name, &nativeEntry, buffer.data(), buffer.size(), &native, &hostError)) == ERANGE)
+            buffer.resize(buffer.size() * 2);
+        if (error != 0 || !native) {
+            *sceNetErrnoLoc() = hostError != 0 ? hostError : 3;
+            if (hostError == -1) errno = error == EAGAIN ? 35 : error;
+            return nullptr;
+        }
+#endif
+        static thread_local HostLookup lookup;
+        lookup.name = native->h_name;
+        lookup.aliasNames.clear();
+        lookup.aliases.clear();
+        lookup.addressBytes.clear();
+        lookup.addresses.clear();
+        for (auto** alias = native->h_aliases; *alias; ++alias) lookup.aliasNames.emplace_back(*alias);
+        for (auto& alias : lookup.aliasNames) lookup.aliases.push_back(alias.data());
+        lookup.aliases.push_back(nullptr);
+        for (auto** address = native->h_addr_list; *address; ++address)
+            lookup.addressBytes.emplace_back(*address, native->h_length);
+        for (auto& address : lookup.addressBytes) lookup.addresses.push_back(address.data());
+        lookup.addresses.push_back(nullptr);
+        lookup.entry = {lookup.name.data(), lookup.aliases.data(), native->h_addrtype == AF_INET6 ? 28 : 2,
+            native->h_length, lookup.addresses.data()};
+        return &lookup.entry;
+    } catch (const std::bad_alloc&) {
+        *sceNetErrnoLoc() = -1;
+        errno = ENOMEM;
+        return nullptr;
+    }
+}
+
 void APS5_VABI freeaddrinfo_nid_postfix(GuestResolver::AddressInfo* first) {
     while (first) {
         auto* next = first->next;
