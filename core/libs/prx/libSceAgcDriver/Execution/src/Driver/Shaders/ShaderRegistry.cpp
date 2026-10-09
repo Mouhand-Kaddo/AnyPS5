@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <list>
+#include <memory>
 #include <stdexcept>
 #include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 
@@ -354,7 +355,8 @@ std::vector<PreparedShaders::Entry> PrepareRegistered(const ShaderSnapshot& snap
         wave = (routing & 0x00400000u) != 0 ? 32u : 64u;
         if ((routing & 0x20u) != 0 || stage == Stage::Mesh || (routing & 4u) != 0) {
             if (registration) return {};
-            auto stageState = state;
+            const auto stageStateStorage = std::make_unique<QueueState>(state);
+            auto& stageState = *stageStateStorage;
             stageState.context[0x1b6] = 0;
             const auto stages = Graphics::DecodeShaderStages(stageState);
             graphics = ShaderRecompiler::GraphicsCompileContext{0, {}, stages.mesh, stages.tessellation, {}};
@@ -450,7 +452,8 @@ void Driver::ResolveGraphicsStagesAbi(std::span<const Shader* const> stages, std
     ShaderPreparationTransaction transaction;
     CheckFailure();
     require(!stages.empty(), "graphics ABI has no shader headers");
-    QueueState state{};
+    const auto stateStorage = std::make_unique<QueueState>();
+    auto& state = *stateStorage;
     std::shared_ptr<const ShaderRegistry> registry;
     std::shared_ptr<const ShaderSnapshot> owner;
     {
@@ -530,7 +533,8 @@ void Driver::ResolveShaderAbi(const Shader* shader, std::span<const ShaderRegist
         require(snapshot->headerAddress == reinterpret_cast<std::uintptr_t>(shader), "static ABI refers to a replaced shader header");
     }
     require(snapshot->registeredState != nullptr, "registered shader state is missing");
-    QueueState state{};
+    const auto stateStorage = std::make_unique<QueueState>();
+    auto& state = *stateStorage;
     state.shader = snapshot->registeredState->shader;
     state.context = snapshot->registeredState->context;
     state.userConfig = snapshot->registeredState->userConfig;
@@ -701,7 +705,8 @@ void Driver::RegisterShader(const Shader* shader) {
         localDevice = device;
     }
     snapshot.registeredState = std::make_shared<const RegisteredShaderState>(DecodeRegisteredState(snapshot));
-    QueueState registered{};
+    const auto registeredStorage = std::make_unique<QueueState>();
+    auto& registered = *registeredStorage;
     registered.shader = snapshot.registeredState->shader;
     registered.context = snapshot.registeredState->context;
     registered.userConfig = snapshot.registeredState->userConfig;
@@ -741,7 +746,8 @@ void Driver::RegisterShader(const Shader* shader) {
         nullRegisteredState.context.emplace(0x1b3u, 0x2u);
         nullRegisteredState.context.emplace(0x1b4u, 0x2u);
         null.registeredState = std::make_shared<const RegisteredShaderState>(std::move(nullRegisteredState));
-        QueueState nullState{};
+        const auto nullStateStorage = std::make_unique<QueueState>();
+        auto& nullState = *nullStateStorage;
         nullState.shader = null.registeredState->shader;
         nullState.context = null.registeredState->context;
         nullState.userConfig = null.registeredState->userConfig;
