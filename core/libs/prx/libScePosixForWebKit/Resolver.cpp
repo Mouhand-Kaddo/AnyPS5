@@ -9,6 +9,7 @@
 #endif
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstdint>
+#include <array>
 #include <cstring>
 #include <cstdlib>
 #include <cerrno>
@@ -28,6 +29,47 @@ struct HostLookup {
     std::vector<std::string> addressBytes;
     std::vector<char*> addresses;
 };
+
+bool NumericAddress(const char* name, std::array<unsigned char, 4>& address) {
+    std::array<unsigned char, 3> parts{};
+    std::size_t count = 0;
+    std::uint64_t value;
+    bool digit;
+    for (;;) {
+        if (*name < '0' || *name > '9') return false;
+        value = 0;
+        int base = 10;
+        digit = false;
+        if (*name == '0') {
+            ++name;
+            if (*name == 'x' || *name == 'X') { base = 16; ++name; }
+            else { base = 8; digit = true; }
+        }
+        for (;;) {
+            const int next = *name >= '0' && *name <= '9' ? *name - '0' :
+                *name >= 'a' && *name <= 'f' ? *name - 'a' + 10 :
+                *name >= 'A' && *name <= 'F' ? *name - 'A' + 10 : -1;
+            if (next < 0 || next >= base) break;
+            value = value * base + next;
+            digit = true;
+            ++name;
+        }
+        if (*name != '.') break;
+        if (count == parts.size() || value > 255) return false;
+        parts[count++] = static_cast<unsigned char>(value);
+        ++name;
+    }
+    if (!digit) return false;
+    if (*name != '\0' && *name != ' ' && *name != '\t' && *name != '\n' &&
+        *name != '\r' && *name != '\f' && *name != '\v') return false;
+    if (count && value >= (std::uint64_t{1} << (8 * (4 - count)))) return false;
+    auto result = static_cast<std::uint32_t>(value);
+    for (std::size_t i = 0; i < count; ++i)
+        result |= static_cast<std::uint32_t>(parts[i]) << (24 - 8 * i);
+    for (std::size_t i = 0; i < address.size(); ++i)
+        address[i] = static_cast<unsigned char>(result >> (24 - 8 * i));
+    return true;
+}
 
 bool Ready() {
 #ifdef _WIN32
@@ -59,21 +101,28 @@ extern "C" {
 GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char* name) {
     if (!name || !Ready()) { *sceNetErrnoLoc() = 3; return nullptr; }
     try {
+        std::array<unsigned char, 4> numericAddress{};
+        char* numericAliases[]{nullptr};
+        char* numericAddresses[]{reinterpret_cast<char*>(numericAddress.data()), nullptr};
+        hostent nativeEntry{const_cast<char*>(name), numericAliases, AF_INET, 4, numericAddresses};
+        hostent* native = &nativeEntry;
+        const bool numeric = NumericAddress(name, numericAddress);
 #ifdef _WIN32
-        auto* native = ::gethostbyname(name);
+        if (!numeric) native = ::gethostbyname(name);
         if (!native) {
             const auto error = WSAGetLastError();
             *sceNetErrnoLoc() = error == WSAHOST_NOT_FOUND ? 1 : error == WSATRY_AGAIN ? 2 : error == WSANO_DATA ? 4 : 3;
             return nullptr;
         }
 #else
-        hostent nativeEntry{};
-        hostent* native = nullptr;
-        std::vector<char> buffer(1024);
+        std::vector<char> buffer;
         int hostError = 0;
-        int error;
-        while ((error = ::gethostbyname_r(name, &nativeEntry, buffer.data(), buffer.size(), &native, &hostError)) == ERANGE)
-            buffer.resize(buffer.size() * 2);
+        int error = 0;
+        if (!numeric) {
+            buffer.resize(1024);
+            while ((error = ::gethostbyname_r(name, &nativeEntry, buffer.data(), buffer.size(), &native, &hostError)) == ERANGE)
+                buffer.resize(buffer.size() * 2);
+        }
         if (error != 0 || !native) {
             *sceNetErrnoLoc() = hostError != 0 ? hostError : 3;
             if (hostError == -1) errno = error == EAGAIN ? 35 : error;
@@ -95,6 +144,7 @@ GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char* name) 
         lookup.addresses.push_back(nullptr);
         lookup.entry = {lookup.name.data(), lookup.aliases.data(), native->h_addrtype == AF_INET6 ? 28 : 2,
             native->h_length, lookup.addresses.data()};
+        if (numeric) *sceNetErrnoLoc() = 0;
         return &lookup.entry;
     } catch (const std::bad_alloc&) {
         *sceNetErrnoLoc() = -1;

@@ -38,6 +38,38 @@ int main() {
     Require(legacy->addresses && legacy->addresses[0]);
     Require(std::memcmp(legacy->addresses[0], loopback.data(), loopback.size()) == 0);
     Require(legacy->addresses[1] == nullptr && legacy->aliases && legacy->aliases[0] == nullptr);
+    struct NumericCase {
+        const char* name;
+        std::array<unsigned char, 4> address;
+    };
+    const NumericCase numericCases[]{
+        {"127.1", {127, 0, 0, 1}},
+        {"127.0.1", {127, 0, 0, 1}},
+        {"0x7f.1", {127, 0, 0, 1}},
+        {"0X7F.0x1", {127, 0, 0, 1}},
+        {"0177.01", {127, 0, 0, 1}},
+        {"0x7f000001", {127, 0, 0, 1}},
+        {"2130706433", {127, 0, 0, 1}},
+        {"127.1 trailing", {127, 0, 0, 1}},
+        {"127.0.0.1\tignored", {127, 0, 0, 1}},
+        {"4294967297", {0, 0, 0, 1}},
+        {"18446744073709551617", {0, 0, 0, 1}},
+        {"0x.1", {0, 0, 0, 1}},
+        {"255.255.255.255", {255, 255, 255, 255}},
+        {"0", {0, 0, 0, 0}},
+        {"1.16777215", {1, 255, 255, 255}},
+        {"1.2.65535", {1, 2, 255, 255}}
+    };
+    for (const auto& test : numericCases) {
+        *sceNetErrnoLoc() = 77;
+        legacy = gethostbyname_nid_postfix(test.name);
+        Require(legacy && std::strcmp(legacy->name, test.name) == 0);
+        Require(legacy->family == 2 && legacy->length == 4);
+        Require(legacy->aliases && !legacy->aliases[0]);
+        Require(legacy->addresses && legacy->addresses[0] && !legacy->addresses[1]);
+        Require(std::memcmp(legacy->addresses[0], test.address.data(), test.address.size()) == 0);
+        Require(*sceNetErrnoLoc() == 0);
+    }
     legacy = gethostbyname_nid_postfix("localhost");
     const auto* native = ::gethostbyname("localhost");
     Require(legacy && native && std::strcmp(legacy->name, native->h_name) == 0);
