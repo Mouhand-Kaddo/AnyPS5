@@ -285,7 +285,7 @@ private:
                 continue;
             }
             const auto memory = query(cursor);
-            if (memory.State != MEM_COMMIT || memory.Type != MEM_PRIVATE) return false;
+            if (memory.State != MEM_COMMIT || memory.Type != MEM_PRIVATE || memory.Protect == PAGE_NOACCESS) return false;
             cursor = std::min(end, reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize);
         }
         return true;
