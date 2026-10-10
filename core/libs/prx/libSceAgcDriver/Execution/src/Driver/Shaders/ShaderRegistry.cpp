@@ -227,10 +227,17 @@ void PublishRegisteredShader(std::shared_ptr<ShaderRegistry>& registry, const st
 
 namespace {
 
-bool PreparedAtUse(const ShaderSnapshot& snapshot, const ShaderRecompiler::RecompileRequest& request) {
+bool PreparedAtUse(const ShaderSnapshot& snapshot, std::size_t codeOffset, const ShaderRecompiler::RecompileRequest& request) {
     if (snapshot.codeAddress == NullPixelProgramAddress() && request.shader.stage == ShaderRecompiler::ShaderStage::Fragment && request.context.waveSize == 32u) {
         APS5_LOG_ERR("The null pixel program has no wave%u artifact for this draw; preparing it at draw", request.context.waveSize);
         return true;
+    }
+    if (snapshot.type == 0 && request.shader.stage == ShaderRecompiler::ShaderStage::Compute && request.context.compute.has_value() && request.context.compute->linearWorkgroups) {
+        auto ordinary = request;
+        ordinary.context.compute->linearWorkgroups = false;
+        if (std::ranges::any_of(snapshot.prepared->entries, [&](const auto& entry) {
+            return entry.codeOffset == codeOffset && entry.handle != nullptr && ShaderRecompiler::MatchesPreparedShader(ordinary, *entry.handle);
+        })) return true;
     }
     if (!snapshot.header.empty()) return snapshot.prepared->deferred;
     if (snapshot.type != 0 || request.shader.stage != ShaderRecompiler::ShaderStage::Compute) throw std::runtime_error("AGC driver: unregistered program is not a compute shader");
@@ -249,7 +256,7 @@ std::shared_ptr<const ShaderRecompiler::SourceHandle> SourceHandleFor(const Shad
     for (const auto& entry : snapshot.prepared->entries) {
         if (entry.codeOffset == codeOffset && ShaderRecompiler::MatchesPreparedShader(request, *entry.handle, key)) return entry.handle;
     }
-    if (PreparedAtUse(snapshot, request)) {
+    if (PreparedAtUse(snapshot, codeOffset, request)) {
         auto handle = PrepareShaderWithDiagnostics(request);
         snapshot.prepared->entries.push_back({codeOffset, handle});
         return handle;
@@ -300,7 +307,7 @@ ShaderRecompiler::PreparedShaderInvocation InvocationFor(const ShaderSnapshot& s
         invocationRequest.shader.code = ShaderRecompiler::GetPreparedCode(*entry.handle);
         if (auto invocation = ShaderRecompiler::PreparedShaderInvocation::TryCreate(invocationRequest, entry.handle, key)) return std::move(*invocation);
     }
-    if (PreparedAtUse(snapshot, request)) {
+    if (PreparedAtUse(snapshot, codeOffset, request)) {
         auto handle = PrepareShaderWithDiagnostics(request);
         invocationRequest = request;
         invocationRequest.shader.code = ShaderRecompiler::GetPreparedCode(*handle);

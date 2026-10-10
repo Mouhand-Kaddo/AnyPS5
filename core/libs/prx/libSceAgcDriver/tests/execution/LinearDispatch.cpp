@@ -88,8 +88,18 @@ void Folded(AgcDriver::VulkanDevice& device, std::uint32_t wave, bool partial) {
     ordinary.shader.code = snapshot.code;
     request.shader.code = snapshot.code;
     snapshot.prepared->entries.push_back({0, ShaderRecompiler::PrepareShader(ordinary)});
-    const auto source = AgcDriver::DriverDetail::SourceHandleFor(snapshot, 0, request);
+    auto incompatible = request;
+    incompatible.context.compute->numThreads[0] = 4;
+    bool rejected = false;
+    try {
+        (void)AgcDriver::DriverDetail::SourceHandleFor(snapshot, 0, incompatible);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("prepared shader artifact is missing") != std::string::npos;
+    }
+    Require(rejected && snapshot.prepared->entries.size() == 1, "registered folded dispatch accepted an unrelated static ABI");
+    if (!partial) (void)AgcDriver::DriverDetail::SourceHandleFor(snapshot, 0, request);
     const auto invocation = AgcDriver::DriverDetail::InvocationFor(snapshot, 0, request);
+    const auto source = AgcDriver::DriverDetail::SourceHandleFor(snapshot, 0, request);
     ShaderRecompiler::SrtRuntime runtime{};
     runtime.userData = descriptor;
     const auto capture = invocation.Capture(runtime);
