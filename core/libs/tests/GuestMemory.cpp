@@ -1001,6 +1001,12 @@ static void CheckFailedCollectKeepsWrites() {
     static_cast<volatile unsigned char*>(block)[8] = 1;
     Require(!collect(block, page * 3, count));
     Require(collect(block, page, count) && count == 1);
+    GuestArena::GuestArenaCommit_nid_postfix(block + page, page, PAGE_READWRITE, page);
+    Require(collect(block, page * 3, count));
+    static_cast<volatile unsigned char*>(block)[8] = 3;
+    GuestArena::GuestArenaCommit_nid_postfix(block + page, page, PAGE_NOACCESS, page);
+    Require(!collect(block, page * 3, count));
+    Require(collect(block, page, count) && count == 1);
     GuestArena::GuestArenaRelease_nid_postfix(block, page * 3);
 
     std::int64_t phys = 0;
@@ -1012,7 +1018,9 @@ static void CheckFailedCollectKeepsWrites() {
     shared[8] = 2;
     Require(sceKernelMprotect(const_cast<unsigned char*>(shared + page), page, 0) == 0);
     Require(!collect(mapped, page * 2, count));
-    Require(collect(mapped, page, count) && count == 4);
+    MEMORY_BASIC_INFORMATION mapping{};
+    Require(VirtualQuery(mapped, &mapping, sizeof(mapping)) == sizeof(mapping));
+    Require(collect(mapped, page, count) && count == (mapping.Type == MEM_PRIVATE ? 1u : 4u));
     Require(sceKernelMunmap(mapped, page * 2) == 0);
     Require(sceKernelReleaseDirectMemory(phys, page * 2) == 0);
 #endif
