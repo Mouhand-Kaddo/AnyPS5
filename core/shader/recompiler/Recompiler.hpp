@@ -48,6 +48,7 @@ struct ShaderComputeStageInfo {
     std::uint32_t threadIdComponentCount;
     std::array<std::uint32_t, 3> partialThreads;
     std::uint32_t scratchDwords = 0;
+    bool linearWorkgroups = false;
 
     [[nodiscard]] bool PartialGroups() const {
         return partialThreads != std::array<std::uint32_t, 3>{};

@@ -150,6 +150,7 @@ private:
         append(key, value.threadIdComponentCount);
         append(key, value.PartialGroups());
         append(key, value.scratchDwords);
+        append(key, value.linearWorkgroups);
     }
 
     static void append(std::vector<std::uint64_t>& key, const ShaderPixelStageInfo& value) {

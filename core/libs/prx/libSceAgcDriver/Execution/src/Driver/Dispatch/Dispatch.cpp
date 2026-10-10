@@ -90,6 +90,18 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
             if (threads[axis] % compute.numThreads[axis] != 0) compute.partialThreads = threads;
         }
     }
+    std::array<std::uint32_t, 3> groups{packet[1], packet[2], packet[3]};
+    if (indirectArguments == 0 && (packet[4] & 0x20u) != 0) {
+        for (std::uint32_t axis = 0; axis < 3; ++axis) {
+            const auto threads = std::max(readRegister(queue.shader, 0x207 + axis) & 0xffffu, 1u);
+            groups[axis] = static_cast<std::uint32_t>((std::uint64_t{groups[axis]} + threads - 1) / threads);
+        }
+    }
+    if (indirectArguments == 0) {
+        const auto physicalGroups = localDevice->LinearDispatchGroups(groups);
+        compute.linearWorkgroups = physicalGroups != groups;
+        groups = physicalGroups;
+    }
     ShaderRecompiler::RecompileRequest request{
         {ShaderRecompiler::ShaderStage::Compute, address, std::span(snapshot.code).subspan(codeOffset), snapshot.headerAddress, snapshot.header},
         {(packet[4] & 0x8000u) != 0 ? 32u : 64u, 0, userData, compute, std::nullopt, std::nullopt, memory, RegisteredFloatMode(snapshot)},
@@ -139,6 +151,7 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
     mix(address);
     mix(packet[4] & 0x8000u);
     for (const auto threads : compute.partialThreads) mix(threads);
+    mix(compute.linearWorkgroups);
     for (const auto word : userData) mix(word);
 
     static const bool keyHygiene = std::getenv("APS5_NO_DISPATCH_KEY_HYGIENE") == nullptr;
@@ -313,14 +326,6 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
     const auto& compiled = *compiledResult;
     std::vector<Graphics::GuestMemorySnapshot> snapshots;
     for (const auto& region : captured) snapshots.push_back({region.guestAddress, region.bytes});
-    std::array<std::uint32_t, 3> groups{packet[1], packet[2], packet[3]};
-    if (indirectArguments == 0 && (packet[4] & 0x20u) != 0) {
-
-        for (std::uint32_t axis = 0; axis < 3; ++axis) {
-            const auto threads = std::max(readRegister(queue.shader, 0x207 + axis) & 0xffffu, 1u);
-            groups[axis] = (groups[axis] + threads - 1) / threads;
-        }
-    }
     const std::uint64_t dispatchThreads = indirectArguments != 0 ? 0 : std::uint64_t{groups[0]} * groups[1] * groups[2] * compute.numThreads[0] * compute.numThreads[1] * compute.numThreads[2];
     static const bool traceIo = std::getenv("APS5_TRACE_DISPATCH_IO") != nullptr;
     if (traceIo) {

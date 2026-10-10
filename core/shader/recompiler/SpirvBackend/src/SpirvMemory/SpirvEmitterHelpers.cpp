@@ -172,7 +172,11 @@ void DefineInputs(SpirvEmitterState& state) {
             addBuiltin(StageInputKind::WorkgroupId, 3u, "gl_WorkGroupID");
         }
     }
-    if (LdsInDeviceMemory(state)) {
+    const bool linear = state.program.Resources().stage == IrShaderStage::Compute && state.inputInfo.compute->linearWorkgroups;
+    if (linear && std::any_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) { return input.kind == StageInputKind::GlobalInvocationId; }) && std::none_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) { return input.kind == StageInputKind::LocalInvocationId; })) {
+        state.inputs.push_back(SpirvInputBinding {{StageInputKind::LocalInvocationId, 0u, 3u, "gl_LocalInvocationID", false}});
+    }
+    if (LdsInDeviceMemory(state) || linear) {
         if (std::none_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) {
             return input.kind == StageInputKind::WorkgroupId;
         })) {

@@ -387,6 +387,7 @@ void verifyKeySensitivity() {
     changes("the LDS size", [](SampleRequest& sample) { sample.request.context.compute->ldsSizeDwords = 64; });
     changes("the thread group size enable", [](SampleRequest& sample) { sample.request.context.compute->tgSizeEnable = true; });
     changes("the thread id component count", [](SampleRequest& sample) { sample.request.context.compute->threadIdComponentCount = 3; });
+    changes("linear workgroups", [](SampleRequest& sample) { sample.request.context.compute->linearWorkgroups = true; });
     changes("the Vulkan version", [](SampleRequest& sample) { sample.request.target.vulkanVersion = 0x00402000u; });
     changes("the SPIR-V version", [](SampleRequest& sample) { sample.request.target.spirvVersion = 0x00010500u; });
     changes("the target subgroup size", [](SampleRequest& sample) { sample.request.target.subgroupSize = 64; });

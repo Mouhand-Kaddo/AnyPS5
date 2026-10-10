@@ -45,6 +45,20 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
     if (kind == StageInputKind::DispatchThreadLimit) {
         return EmitShaderDataDwordLoad(state, state.program.Metadata().bindings.DispatchThreadLimitDword() + component);
     }
+    const bool linear = state.program.Resources().stage == IrShaderStage::Compute && state.inputInfo.compute->linearWorkgroups;
+    if (linear && (kind == StageInputKind::WorkgroupId || kind == StageInputKind::GlobalInvocationId)) {
+        std::uint32_t group = ConstantU32(state, 0u);
+        if (component == 0) {
+            const auto dimensions = state.module.AllocateId();
+            const auto width = state.module.AllocateId();
+            state.module.AddFunction(spv::OpLoad, TypeU32Vector(state, 3u), dimensions, state.numWorkgroupsVariable);
+            state.module.AddFunction(spv::OpCompositeExtract, TypeU32(state), width, dimensions, 0u);
+            group = EmitBinaryU32(state, spv::OpIAdd, EmitInputComponentU32(state, StageInputKind::WorkgroupId, 0u), EmitBinaryU32(state, spv::OpIMul, EmitInputComponentU32(state, StageInputKind::WorkgroupId, 1u), width));
+        }
+        if (kind == StageInputKind::WorkgroupId) return group;
+        const auto local = EmitBuiltinU32(state, StageInputKind::LocalInvocationId, component);
+        return EmitBinaryU32(state, spv::OpIAdd, local, EmitBinaryU32(state, spv::OpIMul, group, ConstantU32(state, state.inputInfo.compute->threadsNum[component])));
+    }
     if (state.laneCount == 2 && (kind == StageInputKind::LocalInvocationId || kind == StageInputKind::GlobalInvocationId)) {
         const auto* workgroup = ShaderWorkgroupInputFor(state);
         if (workgroup == nullptr) {

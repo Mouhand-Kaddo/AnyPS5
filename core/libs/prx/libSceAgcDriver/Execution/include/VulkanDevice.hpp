@@ -37,6 +37,7 @@ public:
     ShaderRecompiler::SpirvTarget Target() const;
     std::optional<ShaderRecompiler::GeometryStageLimits> GeometryLimits() const;
     ShaderRecompiler::SpirvTarget ComputeTarget(std::uint32_t waveSize) const;
+    std::array<std::uint32_t, 3> LinearDispatchGroups(std::array<std::uint32_t, 3> groups) const;
     // Distinguishes this device from every earlier one in the process (a memo keyed by the device
     // cannot rely on the pointer, which a replacement may reuse).
     std::uint64_t Serial() const { return serial; }

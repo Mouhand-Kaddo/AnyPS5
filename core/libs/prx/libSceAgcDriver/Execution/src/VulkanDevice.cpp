@@ -2610,6 +2610,18 @@ ShaderRecompiler::SpirvTarget VulkanDevice::ComputeTarget(std::uint32_t waveSize
     return target;
 }
 
+std::array<std::uint32_t, 3> VulkanDevice::LinearDispatchGroups(std::array<std::uint32_t, 3> groups) const {
+    const auto* limit = state->properties.limits.maxComputeWorkGroupCount;
+    if (groups[0] <= limit[0] || groups[1] != 1 || groups[2] != 1) return groups;
+    for (std::uint32_t rows = 2; std::uint64_t{rows} * rows <= groups[0]; ++rows) {
+        if (groups[0] % rows != 0) continue;
+        const auto columns = groups[0] / rows;
+        if (columns <= limit[0] && rows <= limit[1]) return {columns, rows, 1};
+        if (rows <= limit[0] && columns <= limit[1]) return {rows, columns, 1};
+    }
+    return groups;
+}
+
 std::string VulkanDevice::DeviceName() const {
     return state->properties.deviceName;
 }

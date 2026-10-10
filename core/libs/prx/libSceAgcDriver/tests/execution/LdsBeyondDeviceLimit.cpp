@@ -115,14 +115,15 @@ std::uint64_t WorkgroupBytes(std::span<const std::uint32_t> words) {
     return total;
 }
 
-ShaderRecompiler::RecompileResult Compile(std::uint32_t waveSize, std::uint32_t ldsBytes, const ShaderRecompiler::SpirvTarget& target) {
+ShaderRecompiler::RecompileResult Compile(std::uint32_t waveSize, std::uint32_t ldsBytes, const ShaderRecompiler::SpirvTarget& target, bool linear = false) {
     std::vector<std::uint32_t> userData(8, 0u);
     const auto input = BufferDescriptor(Input.data(), static_cast<std::uint32_t>(Input.size() * 4u));
     const auto output = BufferDescriptor(Output.data(), static_cast<std::uint32_t>(Output.size() * 4u));
     std::copy(input.begin(), input.end(), userData.begin());
     std::copy(output.begin(), output.end(), userData.begin() + 4);
     const std::array<ShaderRecompiler::MemoryRegion, 1> memory{{{reinterpret_cast<std::uintptr_t>(Code.data()), std::as_bytes(std::span(Code))}}};
-    const ShaderRecompiler::ShaderComputeStageInfo compute{{Threads, 1, 1}, ldsBytes / 4u, {true, true, true}, false, 1};
+    ShaderRecompiler::ShaderComputeStageInfo compute{{Threads, 1, 1}, ldsBytes / 4u, {true, true, true}, false, 1};
+    compute.linearWorkgroups = linear;
     ShaderRecompiler::RecompileRequest request{
         {ShaderStage::Compute, reinterpret_cast<std::uintptr_t>(Code.data()), Code, 0, {}},
         {waveSize, 0, userData, compute, std::nullopt, std::nullopt, memory},
@@ -137,7 +138,7 @@ std::uint32_t Group(std::uint32_t x, std::uint32_t y, std::uint32_t z) {
     return (z << 3u) | (y << 2u) | x;
 }
 
-void Run(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, const ShaderRecompiler::SpirvTarget& target, std::uint32_t groupsX, std::uint32_t groupsY, std::uint32_t groupsZ, bool indirect, const std::string& run) {
+void Run(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, const ShaderRecompiler::SpirvTarget& target, std::uint32_t groupsX, std::uint32_t groupsY, std::uint32_t groupsZ, bool indirect, const std::string& run, bool linear = false) {
     const auto limit = target.maxWorkgroupSharedMemoryBytes;
     Require(limit % 8u == 0u && limit >= 2048u, "lds beyond the device limit: unexpected maxComputeSharedMemorySize " + std::to_string(limit));
     const auto fits = [&](const ShaderRecompiler::RecompileResult& compiled, const std::string& what) {
@@ -158,7 +159,7 @@ void Run(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, const ShaderRe
         Input[tid * 4u + 3u] = bytes + tid * 4u;
     }
     Output.fill(Untouched);
-    const auto result = Compile(waveSize, bytes, target);
+    const auto result = Compile(waveSize, bytes, target, linear);
     Require(result.workgroupMemoryDwords == bytes / 4u + 1u, "lds beyond the device limit " + run + ": " + std::to_string(bytes) + " bytes of LDS gave " + std::to_string(result.workgroupMemoryDwords) + " device memory dwords per workgroup");
     fits(result, "LDS above the device limit");
     if (indirect) {
@@ -166,7 +167,7 @@ void Run(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, const ShaderRe
         const auto outcome = device.DispatchIndirect(result, reinterpret_cast<std::uintptr_t>(IndirectGroups.data()), {}, reinterpret_cast<std::uintptr_t>(Code.data()));
         Require(outcome.cpuReason == 8, "lds beyond the device limit " + run + ": the indirect group counts were not read on the CPU (reason " + std::to_string(outcome.cpuReason) + ")");
     } else {
-        device.Dispatch(result, groupsX, groupsY, groupsZ, {}, reinterpret_cast<std::uintptr_t>(Code.data()));
+        device.Dispatch(result, linear ? 4u : groupsX, linear ? 4u : groupsY, groupsZ, {}, reinterpret_cast<std::uintptr_t>(Code.data()));
     }
     device.WaitIdle();
     std::vector<bool> dispatched(MaxGroups, false);
@@ -218,6 +219,8 @@ int main() {
         Run(*device, 64, device->ComputeTarget(32), 4, 2, 1, false, "wave64 split 4x2");
         Run(*device, 64, device->Target(), 2, 2, 2, false, "wave64 2x2x2");
         Run(*device, 32, device->Target(), 2, 2, 2, true, "wave32 indirect 2x2x2");
+        Run(*device, 32, device->Target(), 16, 1, 1, false, "wave32 folded 4x4", true);
+        Run(*device, 64, device->ComputeTarget(32), 16, 1, 1, false, "wave64 split folded 4x4", true);
         std::puts("lds beyond the device limit tests passed");
         return 0;
     } catch (const std::exception& error) {
