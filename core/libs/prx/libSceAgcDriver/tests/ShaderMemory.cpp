@@ -1013,6 +1013,9 @@ void verifyPointerImageTable() {
     const auto split = CompileTable(request(splitCode, 0x31100u));
     require(split.capture->snapshot.tables.tables.at(0).codes == compiled.capture->snapshot.tables.tables.at(0).codes, "pointer image table: split descriptor loads captured different entries");
     require(split.result->imageTableReadRanges == compiled.result->imageTableReadRanges, "pointer image table: split descriptor loads consumed different ranges");
+    auto nonconsecutiveCode = splitCode;
+    nonconsecutiveCode[15] = 0x81138c12u;
+    expectFailure([&] { static_cast<void>(CompileTable(request(nonconsecutiveCode, 0x31200u))); }, "GetImageResource", "pointer image table: nonconsecutive descriptor words were accepted as one table");
     const auto& tables = compiled.capture->snapshot.tables;
     const auto& snapshot = tables.tables.at(0);
     require(snapshot.base == base && snapshot.size == 0u && snapshot.keys == Entries && snapshot.records == Entries && !snapshot.outside && snapshot.fault == 0u, "pointer image table: the column snapshot is wrong");

@@ -184,6 +184,15 @@ alignas(256) constexpr std::array<std::uint32_t, 30> PointerCode{
     0x34101286u, 0x4a101100u, 0x34101084u, 0xe0781000u, 0x80070408u, 0xbf810000u,
 };
 
+alignas(256) constexpr auto SplitPointerCode = [] {
+    std::array<std::uint32_t, PointerCode.size() + 3> code{};
+    std::copy_n(PointerCode.begin(), 12, code.begin());
+    const std::array<std::uint32_t, 5> loads{0xf4080900u, 0x24000040u, 0x81139012u, 0xf4080a00u, 0x26000040u};
+    std::copy(loads.begin(), loads.end(), code.begin() + 12);
+    std::copy(PointerCode.begin() + 14, PointerCode.end(), code.begin() + 17);
+    return code;
+}();
+
 alignas(256) constexpr std::array<std::uint32_t, 32> LoadedPointerCode{
     0xf4080200u, 0xfa000000u, 0xf4080700u, 0xfa000010u, 0xf4080800u, 0xfa000020u, 0xf4040500u, 0xfa000030u,
     0x8f108202u, 0xf4200444u, 0x20000000u, 0x8711ff11u, 0x000000ffu, 0x8f128511u, 0xf40c090au, 0x241fff00u,
@@ -907,6 +916,8 @@ void RunPointerTests(AgcDriver::VulkanDevice& device) {
     std::copy(keys.begin(), keys.end(), Keys.begin());
     const auto palette = RunPointer(device, PointerCode, 6);
     Require(!Faulted(palette), "pointer image table: valid entries faulted:\n" + palette.log);
+    const auto split = RunPointer(device, SplitPointerCode, 6);
+    Require(!Faulted(split) && split.words == palette.words, "pointer image table: split descriptor loads differ from a single load:\n" + split.log);
     for (std::uint32_t group = 0; group < keys.size(); ++group) {
         const auto* words = Root.data() + (PaletteOffset + (keys[group] & 0xffu) * 32u) / 4u;
         if (std::all_of(words, words + 8, [](std::uint32_t word) { return word == 0u; })) {

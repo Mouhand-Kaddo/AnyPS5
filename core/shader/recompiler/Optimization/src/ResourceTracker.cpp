@@ -344,15 +344,29 @@ private:
     static bool MatchAffineOffset(IrValue* value, IrValue*& key, std::uint32_t& stride, std::uint32_t& addend) {
         value = value->Resolve();
         addend = 0;
-        bool matched = MatchScale(value, key, stride);
-        if (!matched && value->Opcode() == IrOpcode::IAdd32 && value->ArgumentCount() == 2u) {
-            if (immediateU32(value->Argument(0), addend)) {
-                matched = MatchScale(value->Argument(1), key, stride);
-            } else if (immediateU32(value->Argument(1), addend)) {
-                matched = MatchScale(value->Argument(0), key, stride);
-            }
+        while (value->Opcode() == IrOpcode::IAdd32 && value->ArgumentCount() == 2u) {
+            std::uint32_t immediate = 0;
+            IrValue* base = nullptr;
+            if (immediateU32(value->Argument(0), immediate)) base = value->Argument(1)->Resolve();
+            else if (immediateU32(value->Argument(1), immediate)) base = value->Argument(0)->Resolve();
+            else break;
+            if (immediate > std::numeric_limits<std::uint32_t>::max() - addend) return false;
+            addend += immediate;
+            value = base;
         }
-        return matched && stride >= 4u && stride % 4u == 0u && key->Type() == IrType::U32;
+        return MatchScale(value, key, stride) && stride >= 4u && stride % 4u == 0u && key->Type() == IrType::U32;
+    }
+
+    bool ConsecutiveTableWord(IrValue* firstValue, std::uint32_t firstOffset, IrValue* value, std::uint32_t offset, std::uint32_t word, bool address) const {
+        if (offset == firstOffset + word * 4u && EquivalentValue(m_program.Resources(), firstValue, value)) return true;
+        IrValue* firstKey = nullptr;
+        IrValue* key = nullptr;
+        std::uint32_t firstStride = 0, stride = 0, firstAddend = 0, addend = 0;
+        if (!MatchAffineOffset(firstValue, firstKey, firstStride, firstAddend) || !MatchAffineOffset(value, key, stride, addend)) return false;
+        if (stride != firstStride || !EquivalentValue(m_program.Resources(), firstKey, key)) return false;
+        const std::int64_t firstImmediate = address ? static_cast<std::int32_t>(firstOffset) : static_cast<std::int64_t>(firstOffset);
+        const std::int64_t immediate = address ? static_cast<std::int32_t>(offset) : static_cast<std::int64_t>(offset);
+        return firstImmediate + firstAddend + word * 4u == immediate + addend;
     }
 
     std::optional<KeyDomain> MatchKeyDomain(IrValue* key) {
@@ -410,17 +424,17 @@ private:
             if (dword == 0u) {
                 first = memory->offset;
                 address = addressRead;
-            } else if (addressRead != address || memory->offset != first + dword * static_cast<std::uint32_t>(sizeof(std::uint32_t))) {
+            } else if (addressRead != address) {
                 return false;
             }
             IrValue* currentHandle = read->Argument(0)->Resolve();
-            if (heapHandle != nullptr && currentHandle != heapHandle) {
+            if (heapHandle != nullptr && !EquivalentValue(m_program.Resources(), currentHandle, heapHandle)) {
                 return false;
             }
             heapHandle = currentHandle;
             if (dword == 0u) {
                 offset = read->Argument(1)->Resolve();
-            } else if (!EquivalentValue(m_program.Resources(), offset, read->Argument(1))) {
+            } else if (!ConsecutiveTableWord(offset, first, read->Argument(1), memory->offset, dword, address)) {
                 return false;
             }
             plan.memory.push_back(memoryIndex);
