@@ -1007,6 +1007,12 @@ void verifyPointerImageTable() {
     require(planningOnly == 8u && !plan->info.usesDma, "pointer image table: the descriptor loads still read through BDA");
 
     const auto compiled = CompileTable(masked);
+    auto splitCode = maskedCode;
+    splitCode.erase(splitCode.begin() + 13, splitCode.begin() + 15);
+    splitCode.insert(splitCode.begin() + 13, {0xf4080900u, 0x24000040u, 0x81139012u, 0xf4080a00u, 0x26000040u});
+    const auto split = CompileTable(request(splitCode, 0x31100u));
+    require(split.capture->snapshot.tables.tables.at(0).codes == compiled.capture->snapshot.tables.tables.at(0).codes, "pointer image table: split descriptor loads captured different entries");
+    require(split.result->imageTableReadRanges == compiled.result->imageTableReadRanges, "pointer image table: split descriptor loads consumed different ranges");
     const auto& tables = compiled.capture->snapshot.tables;
     const auto& snapshot = tables.tables.at(0);
     require(snapshot.base == base && snapshot.size == 0u && snapshot.keys == Entries && snapshot.records == Entries && !snapshot.outside && snapshot.fault == 0u, "pointer image table: the column snapshot is wrong");
