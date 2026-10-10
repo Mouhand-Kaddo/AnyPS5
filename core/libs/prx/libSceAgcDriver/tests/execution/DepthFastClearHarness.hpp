@@ -46,6 +46,7 @@ struct DrawOptions {
     VkCompareOp depthCompare = VK_COMPARE_OP_LESS;
     bool stencilTest = false;
     VkStencilOpState stencil{};
+    bool resummarize = false;
 };
 
 inline std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t stride, std::uint32_t count) {
@@ -115,6 +116,7 @@ inline std::uint32_t Draw(AgcDriver::VulkanDevice& device, const Shaders& compil
     state.colors = {state.color};
     state.hasColorTarget = true;
     state.depth = AgcDriver::Graphics::DepthTarget{surface.depth, surface.stencil, {Width, Height}, surface.format, 1.0f, 0, surface.htile, surface.htileStencil};
+    state.depth->resummarize = options.resummarize;
     state.depthTest = options.depthTest;
     state.depthWrite = options.depthWrite;
     state.depthCompare = options.depthCompare;
@@ -128,7 +130,7 @@ inline std::uint32_t Draw(AgcDriver::VulkanDevice& device, const Shaders& compil
     state.scissor = {{0, 0}, {Width, Height}};
     state.cullMode = VK_CULL_MODE_NONE;
     state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    state.blend.colorWriteMask = 15;
+    state.blend.colorWriteMask = options.resummarize ? 0 : 15;
     state.blends = {state.blend};
     state.blendConstants = {};
     const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(Triangles().size()), 0, 1, 0, false};

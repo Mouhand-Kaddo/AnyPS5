@@ -1053,6 +1053,22 @@ void depthMaintenanceTests() {
     auto absent = makeState();
     absent.context.erase(0x000);
     Require(AgcDriver::Graphics::DepthMaintenanceRejection(absent).empty(), "an absent depth control produced a maintenance verdict");
+    auto readonly = makeState();
+    readonly.context[0x000] = 0x10;
+    readonly.context[0x200] = 0x73;
+    readonly.context[0x010] = 3u | (1u << 29u);
+    readonly.context[0x011] = 1u << 29u;
+    readonly.context[0x002] = 0;
+    readonly.context[0x005] = 0x1000;
+    readonly.context[0x8e] = readonly.context[0x8f] = 0;
+    Require(AgcDriver::Graphics::DepthMaintenanceRejection(readonly).empty(), "read-only always-pass depth resummarization was rejected");
+    const auto state = AgcDriver::Graphics::DecodeState(readonly);
+    Require(state.depth.has_value() && state.depth->resummarize && state.depthTest && !state.depthWrite && !state.stencilTest, "read-only depth resummarization lost its metadata operation");
+    for (const auto [offset, value] : std::array<std::pair<std::uint32_t, std::uint32_t>, 8>{{{0x200, 0x77}, {0x200, 0x23}, {0x200, 0x7b}, {0x011, 1}, {0x002, 1}, {0x000, 0x11}, {0x010, 3}, {0x005, 0}}}) {
+        auto incompatible = readonly;
+        incompatible.context[offset] = value;
+        Require(!AgcDriver::Graphics::DepthMaintenanceRejection(incompatible).empty(), "unsupported depth resummarization state was accepted");
+    }
 }
 
 // SPI_SHADER_Z_FORMAT (0x1c4) and the export enables of DB_SHADER_CONTROL (0x203): Z export needs a
