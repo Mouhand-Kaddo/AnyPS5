@@ -1,6 +1,8 @@
 #include "VulkanTestDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
+#include "Optimization/ResourceProgram.hpp"
 #include "ControlFlow/RequestSerializer.hpp"
 #include <algorithm>
 #include <array>
@@ -78,6 +80,23 @@ void Folded(AgcDriver::VulkanDevice& device, std::uint32_t wave, bool partial) {
     ordinary.context.compute->linearWorkgroups = false;
     Require(ShaderRecompiler::Recompile(ordinary).PipelineVariantId() != compiled.PipelineVariantId(), "folded and ordinary dispatches shared a compiled variant");
     device.Dispatch(compiled, 256, 2, 1);
+    device.WaitIdle();
+    Verify(partial ? 511 : 512);
+    Output.fill(Untouched);
+    AgcDriver::DriverDetail::ShaderSnapshot snapshot{address, 0, 0, {Code.begin(), Code.end()}, {}};
+    snapshot.header.resize(sizeof(Shader));
+    ordinary.shader.code = snapshot.code;
+    request.shader.code = snapshot.code;
+    snapshot.prepared->entries.push_back({0, ShaderRecompiler::PrepareShader(ordinary)});
+    const auto source = AgcDriver::DriverDetail::SourceHandleFor(snapshot, 0, request);
+    const auto invocation = AgcDriver::DriverDetail::InvocationFor(snapshot, 0, request);
+    ShaderRecompiler::SrtRuntime runtime{};
+    runtime.userData = descriptor;
+    const auto capture = invocation.Capture(runtime);
+    const auto registered = invocation.Materialize(*capture);
+    Require(snapshot.prepared->entries.size() == 2 && registered->PipelineVariantId() != ShaderRecompiler::GetPreparedArtifact(*snapshot.prepared->entries.front().handle).variantId, "registered folded dispatch did not prepare a distinct artifact");
+    Require(AgcDriver::DriverDetail::SourceHandleFor(snapshot, 0, request) == source && snapshot.prepared->entries.size() == 2, "registered folded dispatch prepared its artifact again");
+    device.Dispatch(*registered, 256, 2, 1);
     device.WaitIdle();
     Verify(partial ? 511 : 512);
 }
