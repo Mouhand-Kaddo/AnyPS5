@@ -268,14 +268,6 @@ public:
     PhysicalBacking(std::size_t bytes, int memoryType, std::uint64_t start) : memoryType(memoryType), bytes(bytes) {
 #ifdef _WIN32
         static_cast<void>(start);
-        const auto size = static_cast<std::uint64_t>(bytes);
-        section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE, static_cast<DWORD>(size >> 32), static_cast<DWORD>(size), nullptr);
-        if (!section) {
-            const auto error = static_cast<int>(GetLastError());
-            char message[96];
-            std::snprintf(message, sizeof(message), "create direct memory backing of 0x%llx bytes (%llu MiB)", static_cast<unsigned long long>(size), static_cast<unsigned long long>((size + 0xFFFFF) >> 20));
-            throw std::system_error(error, std::system_category(), message);
-        }
 #else
         file = PhysicalFile();
         fileOffset = start;
@@ -301,7 +293,7 @@ public:
 
     ~PhysicalBacking() {
 #ifdef _WIN32
-        CloseHandle(section);
+        if (section != nullptr) CloseHandle(section);
 #else
         if (hostWriteView != nullptr) ::munmap(hostWriteView, bytes);
 #endif
@@ -310,9 +302,9 @@ public:
     PhysicalBacking(const PhysicalBacking&) = delete;
     PhysicalBacking& operator=(const PhysicalBacking&) = delete;
 
-    void Map(std::uintptr_t address, std::size_t bytes, std::uint64_t offset, int protection) const {
+    void Map(std::uintptr_t address, std::size_t bytes, std::uint64_t offset, int protection) {
 #ifdef _WIN32
-        GuestArena::GuestArenaMap_nid_postfix(reinterpret_cast<void*>(address), bytes, section, offset, WinProtFromPosix(protection));
+        GuestArena::GuestArenaMap_nid_postfix(reinterpret_cast<void*>(address), bytes, SharedSection(), offset, WinProtFromPosix(protection));
 #else
         if (::mmap(reinterpret_cast<void*>(address), bytes, protection, MAP_SHARED | MAP_FIXED, file, static_cast<off_t>(fileOffset + offset)) == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "map direct memory backing");
 #endif
@@ -322,6 +314,19 @@ private:
     int memoryType;
     std::size_t bytes;
 #ifdef _WIN32
+    HANDLE SharedSection() {
+        if (section != nullptr) return section;
+        const auto size = static_cast<std::uint64_t>(bytes);
+        section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE, static_cast<DWORD>(size >> 32), static_cast<DWORD>(size), nullptr);
+        if (!section) {
+            const auto error = static_cast<int>(GetLastError());
+            char message[96];
+            std::snprintf(message, sizeof(message), "create direct memory backing of 0x%llx bytes (%llu MiB)", static_cast<unsigned long long>(size), static_cast<unsigned long long>((size + 0xFFFFF) >> 20));
+            throw std::system_error(error, std::system_category(), message);
+        }
+        return section;
+    }
+
     HANDLE section = nullptr;
 #else
     int file = -1;
