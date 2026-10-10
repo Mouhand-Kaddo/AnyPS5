@@ -249,6 +249,23 @@ set_target_properties(libSceAgcDriver PROPERTIES CXX_EXTENSIONS OFF)
 configure_windows_unwind(libSceAgcDriver)
 
 if(BUILD_TESTING)
+    add_test_executable(agc_shader_preparation_stack_tests tests/ShaderPreparationStack.cpp)
+    target_include_directories(agc_shader_preparation_stack_tests PRIVATE
+        ${LIBS_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/core/shader/recompiler
+        ${CMAKE_SOURCE_DIR}/3rdparty/Vulkan-Headers/include
+        ${CMAKE_SOURCE_DIR}/3rdparty/SPIRV-Headers/include)
+    target_link_libraries(agc_shader_preparation_stack_tests PRIVATE libSceAgcDriver libSceFiber libc)
+    configure_windows_unwind(agc_shader_preparation_stack_tests)
+    add_test(NAME agc_shader_preparation_stack COMMAND agc_shader_preparation_stack_tests)
+    add_test(NAME agc_shader_preparation_registered_stack COMMAND agc_shader_preparation_stack_tests --registered)
+    set_tests_properties(agc_shader_preparation_stack PROPERTIES TIMEOUT 20)
+    set_tests_properties(agc_shader_preparation_registered_stack PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77)
+    if(WIN32)
+        set_tests_properties(agc_shader_preparation_stack agc_shader_preparation_registered_stack PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAgcDriver>")
+    endif()
+
     add_test_executable(agc_write_watch_coverage_tests tests/WriteWatchCoverage.cpp)
     target_include_directories(agc_write_watch_coverage_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(agc_write_watch_coverage_tests PRIVATE libc)
