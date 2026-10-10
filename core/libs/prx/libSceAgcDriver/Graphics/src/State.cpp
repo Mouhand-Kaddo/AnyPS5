@@ -193,7 +193,8 @@ VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint
 }
 
 void decodeDepth(const Registers& cx, std::uint32_t depthControl, State& result) {
-    zero(cx, 0x000, 0x00001f9cu, "depth copy, resummarize or decompress draws (DB_RENDER_CONTROL)");
+    const bool resummarize = read(cx, 0x000) == 0x10u;
+    zero(cx, 0x000, resummarize ? 0x00001f8cu : 0x00001f9cu, "depth copy, resummarize or decompress draws (DB_RENDER_CONTROL)");
     const bool depthClear = (read(cx, 0x000) & 1u) != 0;
     const bool stencilClear = (read(cx, 0x000) & 2u) != 0;
     const auto view = read(cx, 0x002);
@@ -214,6 +215,7 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, State& result)
     Require(!stencilClear || (stencil && !stencilReadOnly), "stencil clear requires a writable stencil plane");
     Require(!depthClear || (zFormat != 0 && !depthReadOnly), "depth clear requires a writable depth plane");
     DepthTarget depth{};
+    depth.resummarize = resummarize;
     depth.address = zFormat != 0 ? base(0x012, 0x01a) : 0;
     depth.stencilAddress = stencil ? base(0x013, 0x01b) : 0;
     Require(zFormat == 0 || depthReadOnly || base(0x014, 0x01c) == depth.address, "depth read and written at different addresses is unsupported");
@@ -537,6 +539,13 @@ std::string DepthMaintenanceRejection(const QueueState& queue) {
     const auto depthControl = find(queue.context, 0x200);
     const bool colorMasks = find(queue.context, 0x8e) != queue.context.end() && find(queue.context, 0x8f) != queue.context.end();
     if ((control->second & ~0x2063u) == 0x10u && depthControl != queue.context.end() && (depthControl->second & 3u) == 0 && colorMasks && ColorWriteMask(queue.context) == 0) return {};
+    if (control->second == 0x10u && depthControl != queue.context.end() && colorMasks && ColorWriteMask(queue.context) == 0 && (depthControl->second & 0xeu) == 2u && ((depthControl->second >> 4u) & 7u) == 7u) {
+        const auto zInfo = find(queue.context, 0x010);
+        const auto stencilInfo = find(queue.context, 0x011);
+        const auto view = find(queue.context, 0x002);
+        const auto htile = find(queue.context, 0x005);
+        if (zInfo != queue.context.end() && ((zInfo->second & 3u) == 1u || (zInfo->second & 3u) == 3u) && (zInfo->second & (1u << 29u)) != 0 && stencilInfo != queue.context.end() && (stencilInfo->second & ((1u << 29u) | 1u)) == (1u << 29u) && view != queue.context.end() && view->second == 0 && htile != queue.context.end() && htile->second != 0) return {};
+    }
     return zeroMessage(0x000, control->second, "DB_RENDER_CONTROL depth copy, resummarize or decompress");
 }
 

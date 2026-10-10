@@ -1761,6 +1761,10 @@ std::optional<std::string> KnownValidationFailure(const Context& context, std::s
 }
 
 void Draw(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, std::span<const GuestMemorySnapshot> snapshots, std::shared_ptr<const DrawRecipe>* recipeOut) {
+    if (state.depth && state.depth->resummarize) {
+        Require(state.depthTest && !state.depthWrite && !state.stencilTest && !state.depthBoundsTest && state.depthCompare == VK_COMPARE_OP_ALWAYS, "depth resummarization requires read-only always-pass depth testing");
+        Require((!state.hasColorTarget || state.blend.colorWriteMask == 0) && std::ranges::all_of(state.blends, [](const auto& blend) { return blend.colorWriteMask == 0; }), "depth resummarization with color writes is unsupported");
+    }
     PerformanceTimer timing("Graphics.Draw");
     // APS5_PROFILE_DRAW prints the time of each phase of the draw (microseconds) and the [draws] totals.
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;

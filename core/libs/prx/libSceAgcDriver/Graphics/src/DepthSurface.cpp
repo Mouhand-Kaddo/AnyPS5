@@ -202,6 +202,19 @@ void noteHtileWrites(DepthSurface& surface, const DepthTarget& target) {
     surface.htileGeneration = GuestMemory::CollectWrites(target.htileAddress, bytes);
 }
 
+void validateResummarization(const DepthTarget& target) {
+    Require(target.stencilAddress == 0 && !target.htileStencil && (target.format == VK_FORMAT_D16_UNORM || target.format == VK_FORMAT_D32_SFLOAT), "depth resummarization requires a depth-only surface");
+    const auto width = static_cast<std::uint64_t>(target.extent.width);
+    const auto height = static_cast<std::uint64_t>(target.extent.height);
+    Require(width != 0 && height != 0 && width <= 16384u && height <= 16384u && width % 8u == 0 && height % 8u == 0, "depth resummarization requires whole HTILE tiles");
+    const auto tiles = static_cast<std::size_t>(width / 8u * (height / 8u));
+    const auto bytes = tiles * 4u;
+    Require(target.htileAddress != 0 && GuestMemory::Accessible(reinterpret_cast<const void*>(target.htileAddress), bytes, true), "depth resummarization requires accessible HTILE metadata");
+    std::vector<std::uint32_t> words(tiles);
+    GuestMemory::Read(target.htileAddress, std::as_writable_bytes(std::span(words)), 4);
+    Require(std::ranges::all_of(words, [](auto word) { return word == 0u; }), "depth resummarization requires uniformly fast-cleared HTILE; expanded, compressed or mixed metadata is unsupported");
+}
+
 }
 
 std::uint64_t DepthSliceBytes(VkExtent2D extent, std::uint32_t bytesPerTexel) {
@@ -214,14 +227,16 @@ std::uint64_t DepthSliceBytes(VkExtent2D extent, std::uint32_t bytesPerTexel) {
 
 VkImageView DepthSurfaceView(const Context& context, const DepthTarget& target) {
     std::lock_guard lock(surfacesMutex());
-    const bool cleared = target.htileAddress != 0 && clearedHtiles().erase(target.htileAddress) != 0;
     auto& list = surfaces();
     auto found = std::find_if(list.begin(), list.end(), [&](const auto& surface) { return surface->context.device == context.device && sameSurface(surface->target, target); });
+    if (target.resummarize) validateResummarization(target);
+    const bool cleared = target.htileAddress != 0 && clearedHtiles().erase(target.htileAddress) != 0;
     if (found == list.end()) found = list.insert(list.end(), std::make_unique<DepthSurface>(context, target));
     auto& surface = **found;
     surface.clearDepth = target.clearDepth;
     surface.clearStencil = target.clearStencil;
     if (cleared) surface.pendingClear |= VK_IMAGE_ASPECT_DEPTH_BIT;
+    if (target.resummarize) surface.htileGeneration = 0;
     noteHtileWrites(surface, target);
     surface.ApplyFastClear();
     return surface.view;

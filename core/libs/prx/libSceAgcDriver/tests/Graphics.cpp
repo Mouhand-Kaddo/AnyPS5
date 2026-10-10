@@ -1060,11 +1060,19 @@ void depthMaintenanceTests() {
     readonly.context[0x011] = 1u << 29u;
     readonly.context[0x002] = 0;
     readonly.context[0x005] = 0x1000;
+    readonly.context[0x012] = readonly.context[0x014] = 0x2000;
+    readonly.context[0x007] = 0x001f003f;
+    readonly.context[0x00a] = 0;
+    readonly.context[0x00b] = 0x3f800000;
     readonly.context[0x8e] = readonly.context[0x8f] = 0;
     Require(AgcDriver::Graphics::DepthMaintenanceRejection(readonly).empty(), "read-only always-pass depth resummarization was rejected");
-    const auto state = AgcDriver::Graphics::DecodeState(readonly);
-    Require(state.depth.has_value() && state.depth->resummarize && state.depthTest && !state.depthWrite && !state.stencilTest, "read-only depth resummarization lost its metadata operation");
-    for (const auto [offset, value] : std::array<std::pair<std::uint32_t, std::uint32_t>, 8>{{{0x200, 0x77}, {0x200, 0x23}, {0x200, 0x7b}, {0x011, 1}, {0x002, 1}, {0x000, 0x11}, {0x010, 3}, {0x005, 0}}}) {
+    for (const auto control : {0x72u, 0x73u, 0x007007f3u}) {
+        auto compatible = readonly;
+        compatible.context[0x200] = control;
+        const auto state = AgcDriver::Graphics::DecodeState(compatible);
+        Require(state.depth.has_value() && state.depth->resummarize && state.depthTest && !state.depthWrite && !state.stencilTest, "read-only depth resummarization lost its metadata operation");
+    }
+    for (const auto [offset, value] : std::array<std::pair<std::uint32_t, std::uint32_t>, 9>{{{0x200, 0x77}, {0x200, 0x23}, {0x200, 0x7b}, {0x011, 1}, {0x011, 0}, {0x002, 1}, {0x000, 0x11}, {0x010, 3}, {0x005, 0}}}) {
         auto incompatible = readonly;
         incompatible.context[offset] = value;
         Require(!AgcDriver::Graphics::DepthMaintenanceRejection(incompatible).empty(), "unsupported depth resummarization state was accepted");
